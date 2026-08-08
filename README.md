@@ -82,7 +82,7 @@ LAB\administrator
 
 ```
 
-### Find Which User Own PowerShell Pipe Without Command Execution (WMIQUERY)
+### Find Which User Owns the PowerShell Pipe Without Command Execution (WMIQUERY)
 
 No need to run whoami, or whatever PowerShell command to see who the PowerShell pipe belongs to. We can check with wmiquery.py form impacket. Wmi Query Language is massivly unerappreciated.
 
