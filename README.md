@@ -91,9 +91,9 @@ Here are the commands you need to run a with a screenshot example:
 ## Replace 13108 with PID from PSHost Pipe
 # Example: PSHost.134296493751823186.13108.DefaultAppDomain.powershell
 
-ASSOCIATORS OF {Win32_Process.Handle="13108"} WHERE AssocClass=Win32_SessionProcess
+WQL> ASSOCIATORS OF {Win32_Process.Handle="13108"} WHERE AssocClass=Win32_SessionProcess
 
-SELECT * FROM Win32_LoggedOnUser
+WQL> SELECT * FROM Win32_LoggedOnUser
 
 ```
 
