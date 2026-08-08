@@ -85,6 +85,6 @@ LAB\administrator
 
 ## ToDo
 
-[ ] Allow execution of whole PowerShell file
-[ ] Interactive PowerShell console
-[ ] Find better way to determine who the PSHost pipe belongs to
+- [ ] Allow execution of whole PowerShell file
+- [ ] Interactive PowerShell console
+- [ ] Find better way to determine who the PSHost pipe belongs to
