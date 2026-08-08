@@ -81,6 +81,22 @@ $ python3 PyPsPipeJack.py -k -no-pass ws01.lab.local --pipe PSHost.1342964937518
 LAB\administrator
 
 ```
+
+### Find Which User Own PowerShell Pipe Without Command Execution (WMIQUERY)
+
+No need to run whoami, or whatever PowerShell command to see who the PowerShell pipe belongs to. We can check with wmiquery.py form impacket. Wmi Query Language is massivly unerappreciated.
+
+Here are the commands you need to run a with a screenshot example:
+```
+## Replace 13108 with PID from PSHost Pipe
+# Example: PSHost.134296493751823186.13108.DefaultAppDomain.powershell
+
+ASSOCIATORS OF {Win32_Process.Handle="13108"} WHERE AssocClass=Win32_SessionProcess
+
+SELECT * FROM Win32_LoggedOnUser
+
+```
+
 ![Alt text](media/wmiquery.png)
 
 ## ToDo

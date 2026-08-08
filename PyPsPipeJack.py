@@ -61,7 +61,7 @@ def main(argv=None) -> int:
         logging.getLogger("impacket").setLevel(logging.DEBUG)
 
     domain, username, password, address = parse_target(args.target)
-    #password = "" if args.no_pass else (args.password or "")
+
     if domain is None:
         domain = ''
     
