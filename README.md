@@ -81,7 +81,7 @@ $ python3 PyPsPipeJack.py -k -no-pass ws01.lab.local --pipe PSHost.1342964937518
 LAB\administrator
 
 ```
-
+![Alt text](media/wmiquery.png)
 
 ## ToDo
 
