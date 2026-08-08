@@ -42,32 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--pipe", default="", help="full pipe name under IPC$ to connect to")
     group.add_argument("--command", default="", help="run one command and exit (non-interactive)")
     
-    
-    #p.add_argument("--host", required=True, help="target Windows host")
-    #p.add_argument("-u", "--user", default="",
-    #help="username to authenticate as (optional when -k finds a ccache)")
-
-    # Password: either supply one, or use --no-pass for an explicit blank
-    # password. They are mutually exclusive so the two can't disagree.
-    #pw = p.add_mutually_exclusive_group()
-    #pw.add_argument("-p", "--password", default=None, help="password")
-    '''
-    parser.add_argument("--no-pass", action="store_true",
-                    help="authenticate with a blank password")
-
-
-    parser.add_argument("--port", type=int, default=445)
-    parser.add_argument("-k", "--kerberos", action="store_true",
-                   help="use Kerberos: a ccache from KRB5CCNAME is used if present, "
-                        "otherwise the supplied credentials")
-    parser.add_argument("--aes-key", default="", help="Kerberos AES key (optional)")
-    parser.add_argument("--kdc-host", default=None, help="KDC host for Kerberos (optional)")
-
-    parser.add_argument("-debug", action="store_true",
-                   help="print wire tracing to stderr (same as PSPIPE_DEBUG=1)")
-
-
-    parser.add_argument('-hashes', action="store", metavar = "LMHASH:NTHASH", help='NTLM hashes, format is LMHASH:NTHASH')'''
+ 
     return parser
 
 
@@ -98,12 +73,7 @@ def main(argv=None) -> int:
     else:
         lmhash = ''
         nthash = ''
-    '''
-    ccache_present = bool(os.getenv("KRB5CCNAME"))
-    if not args.user and not (args.kerberos and ccache_present):
-        print("[!] provide -u/--user, or use -k with a ccache in KRB5CCNAME",
-              file=sys.stderr)
-        return 2'''
+
 
     cfg = AuthConfig(
         host=address,
