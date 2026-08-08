@@ -1,72 +1,79 @@
 #!/usr/bin/env python3
-"""CLI for connecting to a Windows PSHost named pipe over SMB and running
-PowerShell commands through PSRP.
-
-Authenticates as the supplied account. If the target pipe's DACL doesn't grant
-that account access, open fails — this tool does not work around that.
-
-Examples
---------
-Enumerate PSHost pipes on the target:
-    python cli.py --host 10.0.0.5 -u alice -p '...' --list
-
-Connect to a specific pipe and get an interactive prompt:
-    python cli.py --host 10.0.0.5 -u alice -p '...' \\
-        --pipe 'PSHost.<ts>.<pid>.DefaultAppDomain.powershell'
-
-Kerberos instead of NTLM:
-    python cli.py --host host.lab.local -u alice -p '...' \\
-        -d LAB --kerberos --list
-
-Blank password (e.g. accounts configured without one) and full tracing:
-    python cli.py --host 10.0.0.5 -u alice --no-pass --debug --list
-
-Short flags: -u/--user, -p/--password, -d/--domain.
-"""
-
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 
 from pspipe.transport import AuthConfig, PipeConn
 from pspipe.session import PSRPSession, set_debug
+from impacket.examples.utils import parse_target
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="PSRP-over-SMB-named-pipe client (authorized research use)")
-    p.add_argument("--host", required=True, help="target Windows host")
-    p.add_argument("-u", "--user", required=True, help="username to authenticate as")
+    parser = argparse.ArgumentParser(description="PowerShell Pipe Jacker")
+    parser.add_argument('target', action='store', help='[[domain/]username[:password]@]<targetName or address>')
+    parser.add_argument('-debug', action='store_true', help='Turn DEBUG output ON')
+    
+    group = parser.add_argument_group('authentication')
+
+    group.add_argument('-hashes', action="store", metavar = "LMHASH:NTHASH", help='NTLM hashes, format is LMHASH:NTHASH')
+    group.add_argument('-no-pass', action="store_true", help='don\'t ask for password (useful for -k)')
+    group.add_argument('-k', action="store_true", help='Use Kerberos authentication. Grabs credentials from ccache file '
+                                                       '(KRB5CCNAME) based on target parameters. If valid credentials '
+                                                       'cannot be found, it will use the ones specified in the command '
+                                                       'line')
+    group.add_argument('-aesKey', action="store", metavar = "hex key", help='AES key to use for Kerberos Authentication '
+                                                                            '(128 or 256 bits)')
+    group = parser.add_argument_group('connection')
+    
+    group.add_argument('-dc-ip', action='store', metavar="ip address",
+                       help='IP Address of the domain controller. If omitted it will use the domain part (FQDN) specified in '
+                            'the target parameter')
+    group.add_argument('-target-ip', action='store', metavar="ip address",
+                       help='IP Address of the target machine. If omitted it will use whatever was specified as target. '
+                            'This is useful when target is the NetBIOS name and you cannot resolve it')
+    group.add_argument('-port', choices=['139', '445'], nargs='?', default='445', metavar="destination port",
+                       help='Destination port to connect to SMB Server')
+
+    group = parser.add_argument_group('PowerShell Pipes')
+    group.add_argument("--list", action="store_true", help="list PSHost pipes and exit")
+    group.add_argument("--pipe", default="", help="full pipe name under IPC$ to connect to")
+    group.add_argument("--command", default="", help="run one command and exit (non-interactive)")
+    
+    
+    #p.add_argument("--host", required=True, help="target Windows host")
+    #p.add_argument("-u", "--user", default="",
+    #help="username to authenticate as (optional when -k finds a ccache)")
 
     # Password: either supply one, or use --no-pass for an explicit blank
     # password. They are mutually exclusive so the two can't disagree.
-    pw = p.add_mutually_exclusive_group()
-    pw.add_argument("-p", "--password", default=None, help="password")
-    pw.add_argument("--no-pass", action="store_true",
+    #pw = p.add_mutually_exclusive_group()
+    #pw.add_argument("-p", "--password", default=None, help="password")
+    '''
+    parser.add_argument("--no-pass", action="store_true",
                     help="authenticate with a blank password")
 
-    p.add_argument("-d", "--domain", default="", help="domain (blank for local account)")
-    p.add_argument("--port", type=int, default=445)
-    p.add_argument("--kerberos", action="store_true", help="use Kerberos instead of NTLM")
-    p.add_argument("--aes-key", default="", help="Kerberos AES key (optional)")
-    p.add_argument("--kdc-host", default=None, help="KDC host for Kerberos (optional)")
 
-    p.add_argument("--debug", action="store_true",
+    parser.add_argument("--port", type=int, default=445)
+    parser.add_argument("-k", "--kerberos", action="store_true",
+                   help="use Kerberos: a ccache from KRB5CCNAME is used if present, "
+                        "otherwise the supplied credentials")
+    parser.add_argument("--aes-key", default="", help="Kerberos AES key (optional)")
+    parser.add_argument("--kdc-host", default=None, help="KDC host for Kerberos (optional)")
+
+    parser.add_argument("-debug", action="store_true",
                    help="print wire tracing to stderr (same as PSPIPE_DEBUG=1)")
 
-    p.add_argument("--list", action="store_true", help="list PSHost pipes and exit")
-    p.add_argument("--pipe", default="", help="full pipe name under IPC$ to connect to")
-    p.add_argument("--command", default="", help="run one command and exit (non-interactive)")
-    return p
+
+    parser.add_argument('-hashes', action="store", metavar = "LMHASH:NTHASH", help='NTLM hashes, format is LMHASH:NTHASH')'''
+    return parser
 
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
-
-    # --debug turns on the same wire tracing as PSPIPE_DEBUG=1, set before any
-    # session work so the handshake is traced too. It also raises impacket's
-    # own logging to DEBUG so the SMB-level exchange is visible.
+    print()
     if args.debug:
         set_debug(True)
         import logging
@@ -78,19 +85,37 @@ def main(argv=None) -> int:
         # impacket logs under the root logger; make sure it isn't filtered.
         logging.getLogger("impacket").setLevel(logging.DEBUG)
 
-    # Resolve the password: --no-pass means an explicit empty password; if
-    # neither --password nor --no-pass was given, default to empty as before.
-    password = "" if args.no_pass else (args.password or "")
+    domain, username, password, address = parse_target(args.target)
+    #password = "" if args.no_pass else (args.password or "")
+    if domain is None:
+        domain = ''
+    
+    if password == '' and username != '' and args.hashes is None and args.no_pass is False and args.aesKey is None:
+        from getpass import getpass
+        password = getpass("Password:")
+    if args.hashes is not None:
+        lmhash, nthash = args.hashes.split(':')
+    else:
+        lmhash = ''
+        nthash = ''
+    '''
+    ccache_present = bool(os.getenv("KRB5CCNAME"))
+    if not args.user and not (args.kerberos and ccache_present):
+        print("[!] provide -u/--user, or use -k with a ccache in KRB5CCNAME",
+              file=sys.stderr)
+        return 2'''
 
     cfg = AuthConfig(
-        host=args.host,
-        username=args.user,
+        host=address,
+        username=username,
         password=password,
-        domain=args.domain,
+        domain=domain,
         port=args.port,
-        use_kerberos=args.kerberos,
-        aes_key=args.aes_key,
-        kdc_host=args.kdc_host,
+        use_kerberos=args.k,
+        aes_key=args.aesKey,
+        kdc_host=args.dc_ip,
+        nthash=nthash,
+        lmhash=lmhash
     )
 
     conn = PipeConn(cfg)
@@ -136,7 +161,7 @@ def main(argv=None) -> int:
             session.close()
             return 0
 
-        # interactive REPL
+        '''INTERACTIVE DOESNT WORK YET
         print("Connected. Enter PowerShell commands; 'exit' to quit.")
         try:
             while True:
@@ -149,7 +174,7 @@ def main(argv=None) -> int:
                 if line:
                     session.run_command(line, wait=True, timeout=30.0)
         finally:
-            session.close()
+            session.close()'''
         return 0
     finally:
         conn.close()

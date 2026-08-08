@@ -1,17 +1,4 @@
-"""Layer 3 framing: PSRP fragments (MS-PSRP 2.2.4) and the out-of-process
-transport packet vocabulary (MS-PSRP 2.2.5).
 
-IMPORTANT: the out-of-process transport is NEWLINE-delimited. PowerShell's
-server reads packets with a line reader and writes them with WriteLine, so each
-`<Data .../>` / `<*Ack .../>` element is terminated by '\n'. (An earlier version
-here used a NUL terminator, which the server's ReadLine never treats as a line
-end — so it buffers the packet forever and never responds. That was the bug
-behind "reads block / server silent".)
-
-pypsrp builds the PSRP *message* (40-byte header + CLIXML); this module
-fragments it and wraps each fragment in the newline-terminated packet the pipe
-transport expects, and parses the server's packets back into messages.
-"""
 
 from __future__ import annotations
 

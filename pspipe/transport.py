@@ -1,22 +1,8 @@
-"""Layer 1: SMB2 transport + named-pipe I/O over IPC$ using impacket.
 
-Auth is ordinary NTLM or Kerberos as *yourself*. This module does not attempt
-to bypass a pipe's DACL or impersonate another identity. If the target pipe's
-security descriptor doesn't grant your account access, openFile raises, and that
-is the access check working as intended.
-
-Thread-safety note
-------------------
-impacket's SMBConnection is NOT safe to use from multiple threads: two threads
-touching the same socket interleave each other's SMB responses and both stall
-(you see a NetBIOS timeout). The PSRP session runs a background reader thread
-while the main thread writes, so every SMB operation here is serialized behind
-one lock. Reads use a short timeout so a no-data poll returns immediately and
-never holds the lock while the writer is waiting.
-"""
 
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import dataclass
 from typing import List, Optional
@@ -29,7 +15,7 @@ from impacket.smbconnection import SessionError
 @dataclass
 class AuthConfig:
     host: str
-    username: str
+    username: str = ""
     password: str = ""
     domain: str = ""
     port: int = 445
@@ -40,6 +26,8 @@ class AuthConfig:
     # writes/handshake get a longer budget.
     read_timeout: int = 2
     op_timeout: int = 30
+    lmhash: str = ""
+    nthash: str = ""
 
 
 class PipeConn:
@@ -65,19 +53,41 @@ class PipeConn:
             sess_port=self.cfg.port,
         )
         smb.setTimeout(self.cfg.op_timeout)
+
         if self.cfg.use_kerberos:
+            # Follows the impacket -k convention: if KRB5CCNAME points at a
+            # credential cache, use the ticket in it (and fill in any missing
+            # username/domain from the ticket's principal); otherwise fall back
+            # to the supplied username/password/aesKey.
+            use_cache = bool(os.getenv("KRB5CCNAME"))
+            if use_cache:
+                try:
+                    from impacket.krb5.ccache import CCache
+                    domain, username, _tgt, _tgs = CCache.parseFile(
+                        self.cfg.domain, self.cfg.username
+                    )
+                    if not self.cfg.domain and domain:
+                        self.cfg.domain = domain
+                    if not self.cfg.username and username:
+                        self.cfg.username = username
+                except Exception:
+                    # If the cache can't be parsed, still let impacket try it.
+                    pass
             smb.kerberosLogin(
                 user=self.cfg.username,
                 password=self.cfg.password,
                 domain=self.cfg.domain,
                 aesKey=self.cfg.aes_key,
                 kdcHost=self.cfg.kdc_host,
+                useCache=use_cache,
             )
         else:
             smb.login(
                 user=self.cfg.username,
                 password=self.cfg.password,
                 domain=self.cfg.domain,
+                lmhash=self.cfg.lmhash,
+                nthash=self.cfg.nthash
             )
         self._smb = smb
         self._tree_id = smb.connectTree(self.IPC)
@@ -127,12 +137,6 @@ class PipeConn:
         return len(data)
 
     def read(self, max_bytes: int = 65536) -> bytes:
-        """Poll the pipe for available bytes.
-
-        Uses a short timeout so that when the pipe has nothing pending, the SMB2
-        READ returns/raises quickly instead of blocking the shared socket. A
-        timeout or empty read is reported as b"" (no data yet), not an error.
-        """
         assert self._smb is not None and self._file_id is not None, "open_pipe() first"
         with self._lock:
             self._smb.setTimeout(self.cfg.read_timeout)

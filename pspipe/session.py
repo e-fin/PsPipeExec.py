@@ -1,16 +1,4 @@
-"""Layer 3 protocol driver (instrumented).
 
-Fixes over the previous version, based on the wire trace:
-  * A pipeline is registered with a `<Command PSGuid=...>` packet and its
-    `<CommandAck>` awaited BEFORE sending the CreatePipeline data. Without this
-    the server acks the bytes but never starts a pipeline.
-  * `<Data>` packets carrying a pipeline message now ride on that pipeline's
-    PSGuid channel (not the empty pool GUID).
-  * The client now sends `<DataAck>` for each server `<Data>` packet, which the
-    pipeline-output path expects.
-
-Set PSPIPE_DEBUG=1 to trace bytes and message types.
-"""
 
 from __future__ import annotations
 
@@ -112,11 +100,7 @@ class PSRPSession:
         _dbg(f"  sent <{pkt.tag}> ps_guid={pkt.ps_guid[:8]} ({len(wire)} bytes)")
 
     def _send_message(self, message_type: int, pid: Optional[str], data_obj) -> None:
-        """Serialize a PSRP message and send it as Data packet(s).
 
-        Pool-level messages (pid=None) go on the empty-GUID channel; pipeline
-        messages ride on the pipeline's own PSGuid.
-        """
         msg = Message(Destination.SERVER, self.pool_id, pid, data_obj, self.serializer)
         packed = msg.pack()
         channel = pid if pid is not None else EMPTY_GUID
