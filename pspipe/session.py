@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import os
 import sys
 import threading
@@ -87,13 +86,13 @@ class PSRPSession:
         self._pipeline_done = threading.Event()
         self._command_ack = threading.Event()
 
-        # Reader coordination. _reader_run is normally set (reader active). We
-        # clear it to pause the reader around a critical write sequence so that
-        # no readFile is left pending on the pipe handle between two writes that
-        # the server needs to see back-to-back. _reader_idle signals that the
-        # reader is parked (not inside a blocking read).
+        # Reader parking. The reader only issues blocking reads while _reader_run
+        # is set; otherwise it parks (announcing via _reader_idle) without any
+        # read pending on the pipe handle. We keep it parked whenever no command
+        # is in flight, so sitting idle at the prompt never leaves a pending
+        # read to corrupt the next command's writes — the session then survives
+        # arbitrary idle time.
         self._reader_run = threading.Event()
-        self._reader_run.set()
         self._reader_idle = threading.Event()
 
     # -- low-level packet send ------------------------------------------------
@@ -118,31 +117,11 @@ class PSRPSession:
             self._send_oop(OOPPacket(tag="Data", ps_guid=channel,
                                      stream="Default", payload=frag.pack()))
 
-    # -- reader pause (for contiguous critical writes) ------------------------
-
-    @contextlib.contextmanager
-    def _reader_paused(self, settle: float = 2.5):
-        """Pause the reader so no readFile straddles the enclosed writes.
-
-        Clears _reader_run and waits (up to `settle`) for the reader to park
-        between reads — i.e. for any in-flight blocking readFile to finish. The
-        enclosed writes then go out with no read pending on the pipe handle.
-        Restores the reader on exit.
-        """
-        self._reader_idle.clear()
-        self._reader_run.clear()
-        # Wait for the reader to reach the parked state (it sets _reader_idle
-        # just before waiting on _reader_run). settle covers one read_timeout.
-        self._reader_idle.wait(settle)
-        try:
-            yield
-        finally:
-            self._reader_run.set()
-
     # -- handshake / pool -----------------------------------------------------
 
     def open(self, timeout: float = 10.0) -> None:
         self._start_reader()
+        self._reader_activate()  # reader active during the pool handshake
         self._send_message(
             MessageType.SESSION_CAPABILITY, None,
             SessionCapability(protocol_version="2.3", ps_version="2.0",
@@ -159,6 +138,9 @@ class PSRPSession:
         )
         if not self._pool_open.wait(timeout):
             self.on_error("runspace pool did not report Opened within timeout; continuing")
+        # Park the reader while idle at the prompt: no read pending on the handle,
+        # so the session can sit idle indefinitely between commands.
+        self._reader_park()
 
     # -- command execution ----------------------------------------------------
 
@@ -174,29 +156,31 @@ class PSRPSession:
             redirect_err_to_out=True,
         )
 
-        # The server acts on the pipeline once the CreatePipeline data arrives —
-        # a bare <Command> is not acknowledged on its own. So we do NOT block on
-        # CommandAck (that wait just burns time and lets a reader read sit
-        # pending on the pipe handle). Instead we pause the reader and send the
-        # <Command> registration immediately followed by the CreatePipeline
-        # <Data>, so both reach the server back-to-back with no read straddling
-        # them. That is exactly the timing the working fast path had.
-        _dbg(f"registering + creating pipeline {pid[:8]} (reader paused)")
-        with self._reader_paused():
-            self._send_oop(OOPPacket(tag="Command", ps_guid=pid))
-            self._send_message(
-                MessageType.CREATE_PIPELINE, pid,
-                CreatePipeline(
-                    no_input=True,
-                    apartment_state=ApartmentState(value=2),
-                    remote_stream_options=RemoteStreamOptions(value=0),
-                    add_to_history=True, host_info=HostInfo(),
-                    pipeline=pipeline, is_nested=False,
-                ),
-            )
-        if wait:
-            if not self._pipeline_done.wait(timeout):
-                self.on_error(f"pipeline did not complete within {timeout:.0f}s")
+        # Wake the reader for this command. Because it was parked while idle,
+        # there is no stale read pending on the handle, so the <Command> and
+        # CreatePipeline writes reach the server cleanly regardless of how long
+        # we were idle. We do NOT wait on CommandAck between the two sends (a
+        # bare <Command> isn't acked on its own; that wait only added delay).
+        _dbg(f"activating reader + creating pipeline {pid[:8]}")
+        self._reader_activate()
+        self._send_oop(OOPPacket(tag="Command", ps_guid=pid))
+        self._send_message(
+            MessageType.CREATE_PIPELINE, pid,
+            CreatePipeline(
+                no_input=True,
+                apartment_state=ApartmentState(value=2),
+                remote_stream_options=RemoteStreamOptions(value=0),
+                add_to_history=True, host_info=HostInfo(),
+                pipeline=pipeline, is_nested=False,
+            ),
+        )
+        try:
+            if wait:
+                if not self._pipeline_done.wait(timeout):
+                    self.on_error(f"pipeline did not complete within {timeout:.0f}s")
+        finally:
+            # Park the reader again so the next idle period is safe.
+            self._reader_park()
         return ""
 
     # -- reader loop ----------------------------------------------------------
@@ -205,12 +189,28 @@ class PSRPSession:
         self._reader_thread = threading.Thread(target=self._read_loop, daemon=True)
         self._reader_thread.start()
 
+    def _reader_activate(self) -> None:
+        """Wake the reader so it resumes issuing reads (a command is starting)."""
+        self._reader_idle.clear()
+        self._reader_run.set()
+
+    def _reader_park(self, settle: float = 3.0) -> None:
+        """Park the reader and wait for it to stop reading (command finished).
+
+        Clears _reader_run and waits (up to `settle`) for the reader to finish
+        any in-flight blocking read and announce _reader_idle. After this returns
+        there is no read pending on the pipe handle, so the connection can sit
+        idle indefinitely without a pending read to corrupt the next write.
+        """
+        self._reader_idle.clear()
+        self._reader_run.clear()
+        self._reader_idle.wait(settle)
+
     def _read_loop(self) -> None:
         _dbg("reader thread started")
         while not self._stop.is_set():
-            # Honor a pause request: park here (announcing idle) until resumed.
-            # This is checked between reads, so when _reader_paused() waits on
-            # _reader_idle it knows no readFile is in flight.
+            # Park while not activated: announce idle, then wait to be resumed.
+            # Checked between reads, so when parked there is no read in flight.
             if not self._reader_run.is_set():
                 self._reader_idle.set()
                 self._reader_run.wait(timeout=1.0)
