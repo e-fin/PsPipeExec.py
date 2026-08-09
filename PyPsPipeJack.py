@@ -5,6 +5,7 @@ import argparse
 import os
 import sys
 import time
+from charset_normalizer import from_path
 
 from pspipe.transport import AuthConfig, PipeConn
 from pspipe.session import PSRPSession, set_debug
@@ -41,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--list", action="store_true", help="list PSHost pipes and exit")
     group.add_argument("--pipe", default="", help="full pipe name under IPC$ to connect to")
     group.add_argument("--command", default="", help="run one command and exit (non-interactive)")
-    
+    group.add_argument("--script", default="", help="run entire PS1 file")
  
     return parser
 
@@ -125,13 +126,20 @@ def main(argv=None) -> int:
         session = PSRPSession(conn)
         session.open()
 
+        if args.script:
+            scriptcontent = from_path(args.script).best()
+            contents = str(scriptcontent)
+            session.run_command(contents, wait=True)
+            #time.sleep(5)
+            #session.close()
+            return 0
         if args.command:
             session.run_command(args.command, wait=True)
-            time.sleep(0.3)
-            session.close()
+            #time.sleep(0.3)
+            #session.close()
             return 0
 
-        '''INTERACTIVE DOESNT WORK YET
+        #'''INTERACTIVE DOESNT WORK YET
         print("Connected. Enter PowerShell commands; 'exit' to quit.")
         try:
             while True:
@@ -142,9 +150,9 @@ def main(argv=None) -> int:
                 if line in ("exit", "quit"):
                     break
                 if line:
-                    session.run_command(line, wait=True, timeout=30.0)
+                    session.run_command(line, wait=True)
         finally:
-            session.close()'''
+            session.close()#'''
         return 0
     finally:
         conn.close()

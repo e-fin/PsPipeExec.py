@@ -129,27 +129,56 @@ class PipeConn:
 
     def write(self, data: bytes) -> int:
         assert self._smb is not None and self._file_id is not None, "open_pipe() first"
+        import os as _os, sys as _sys, time as _time
+        _trace = _os.environ.get("PSPIPE_RWTRACE", "") not in ("", "0", "false", "False")
+        if _trace:
+            print(f"[rw] write() waiting for lock @ {_time.time():.3f} ({len(data)} bytes)",
+                  file=_sys.stderr, flush=True)
+        t0 = _time.time()
         with self._lock:
+            if _trace:
+                print(f"[rw] write() got lock after {_time.time() - t0:.3f}s",
+                      file=_sys.stderr, flush=True)
             self._smb.setTimeout(self.cfg.op_timeout)
             self._smb.writeFile(self._tree_id, self._file_id, data)
         return len(data)
 
     def read(self, max_bytes: int = 65536) -> bytes:
         assert self._smb is not None and self._file_id is not None, "open_pipe() first"
+        import os as _os, sys as _sys, time as _time
+        _trace = _os.environ.get("PSPIPE_RWTRACE", "") not in ("", "0", "false", "False")
+
+        def _t(msg):
+            if _trace:
+                print(f"[rw] {msg}", file=_sys.stderr, flush=True)
+
+        _t(f"read() waiting for lock @ {_time.time():.3f}")
+        t_lock0 = _time.time()
         with self._lock:
+            t_lock1 = _time.time()
+            _t(f"read() got lock after {t_lock1 - t_lock0:.3f}s")
             self._smb.setTimeout(self.cfg.read_timeout)
+            t0 = _time.time()
             try:
-                return self._smb.readFile(
+                data = self._smb.readFile(
                     self._tree_id, self._file_id,
                     bytesToRead=max_bytes, singleCall=True,
                 )
+                _t(f"readFile returned {len(data)} bytes in {_time.time() - t0:.3f}s")
+                return data
             except NetBIOSTimeout:
+                _t(f"readFile NetBIOSTimeout after {_time.time() - t0:.3f}s")
                 return b""
-            except SessionError:
+            except SessionError as _e:
                 # e.g. STATUS_PIPE_EMPTY / pending — treat as no data this poll.
+                _t(f"readFile SessionError after {_time.time() - t0:.3f}s: {_e}")
                 return b""
-            except Exception:
+            except Exception as _e:
+                _t(f"readFile {type(_e).__name__} after {_time.time() - t0:.3f}s: {_e}")
                 return b""
+
+    def _trace_write(self, when: str) -> None:
+        pass
 
     def close(self) -> None:
         if self._smb is None:
