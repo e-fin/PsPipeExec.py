@@ -145,4 +145,4 @@ ASSOCIATORS OF {Win32_Process.Handle="13108"} WHERE AssocClass=Win32_SessionProc
 ASSOCIATORS OF {Win32_LogonSession.LogonId="<LogonId>"} WHERE AssocClass=Win32_LoggedOnUser
 ```
 
-This traces the process to its logon session, then to the user account — no command execution required. The lookup uses the same credentials as the SMB connection. If WMI access is restricted, the tool prints a warning and continues without owner info. Pass `--no-wmi` to skip the lookup entirely.
+This traces the process to its logon session, then to the user account, no command execution required. The lookup uses the same credentials as the SMB connection. If WMI access is restricted, the tool prints a warning and continues without owner info. Pass `--no-wmi` to skip the lookup entirely.
