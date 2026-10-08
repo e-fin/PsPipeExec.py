@@ -38,6 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--pipe", default="", help="full pipe name under IPC$ to connect to")
     group.add_argument("--command", default="", help="run one command and exit (non-interactive)")
     group.add_argument("--script", default="", help="run entire PS1 file")
+    group.add_argument("--no-wmi", action="store_true",
+                       help="skip WMI owner lookup for pipes")
 
     return parser
 
@@ -153,14 +155,35 @@ def main(argv=None) -> int:
             if not names:
                 print("No PSHost pipes visible (none running, or listing restricted).")
                 return 0
+
+            # Optionally resolve pipe owners via WMI before printing.
+            owners = {}
+            if not args.no_wmi:
+                from pspipe.wmi import resolve_pipe_owners
+                owners = resolve_pipe_owners(cfg, names)
+
             print("PSHost pipes on target:")
             for n in names:
-                print("  ", n)
+                owner = owners.get(n)
+                if owner:
+                    print(f"   {n}  ({owner})")
+                else:
+                    print(f"   {n}")
             return 0
 
         if not args.pipe:
             print("[!] --pipe is required unless --list is used", file=sys.stderr)
             return 2
+
+        # Optionally show pipe owner before connecting.
+        if not args.no_wmi:
+            from pspipe.wmi import resolve_pipe_owners
+            owners = resolve_pipe_owners(cfg, [args.pipe])
+            owner = owners.get(args.pipe)
+            if owner:
+                print(f"[*] Pipe owner: {owner}")
+            else:
+                print("[*] Pipe owner: (unknown)")
 
         try:
             conn.open_pipe(args.pipe)
