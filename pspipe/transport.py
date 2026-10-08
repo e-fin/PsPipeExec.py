@@ -38,7 +38,6 @@ class PipeConn:
         self._smb: Optional[SMBConnection] = None
         self._tree_id: Optional[int] = None
         self._file_id = None
-        self._pipe_name: Optional[str] = None
         # One lock guards ALL access to the SMBConnection.
         self._lock = threading.Lock()
 
@@ -122,7 +121,6 @@ class PipeConn:
                 creationOption=0x40,       # non-directory
                 creationDisposition=0x1,   # FILE_OPEN (must already exist)
             )
-        self._pipe_name = pipe_name
         return self
 
     # -- byte-mode I/O (all serialized) --------------------------------------
@@ -152,6 +150,7 @@ class PipeConn:
     def close(self) -> None:
         if self._smb is None:
             return
+        # Teardown order: pipe handle -> IPC$ tree -> SMB session.
         with self._lock:
             try:
                 if self._file_id is not None:

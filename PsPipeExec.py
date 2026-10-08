@@ -63,7 +63,15 @@ def main(argv=None) -> int:
     if domain is None:
         domain = ''
     
-    if password == '' and username != '' and args.hashes is None and args.no_pass is False and args.aesKey is None:
+    # Prompt for password when no other auth method was supplied.
+    needs_password = (
+        password == ''
+        and username != ''
+        and args.hashes is None
+        and not args.no_pass
+        and args.aesKey is None
+    )
+    if needs_password:
         from getpass import getpass
         password = getpass("Password:")
     if args.hashes is not None:
@@ -77,7 +85,6 @@ def main(argv=None) -> int:
         lmhash = ''
         nthash = ''
 
-
     cfg = AuthConfig(
         host=address,
         username=username,
@@ -85,7 +92,7 @@ def main(argv=None) -> int:
         domain=domain,
         port=int(args.port),
         use_kerberos=args.k,
-        aes_key=args.aesKey,
+        aes_key=args.aesKey or "",
         kdc_host=args.dc_ip,
         nthash=nthash,
         lmhash=lmhash

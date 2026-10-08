@@ -1,10 +1,7 @@
-
-
 from __future__ import annotations
 
 import base64
 import struct
-import uuid
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 from xml.etree import ElementTree as ET
@@ -29,6 +26,7 @@ class Fragment:
     blob: bytes
 
     def pack(self) -> bytes:
+        # Wire format: [object_id:8][fragment_id:8][flags:1][blob_len:4][blob:N]
         flags = (_FRAG_START if self.start else 0) | (_FRAG_END if self.end else 0)
         return (
             struct.pack(">QQB", self.object_id, self.fragment_id, flags)
@@ -74,6 +72,7 @@ def parse_fragment(data: bytes) -> Fragment:
     )
 
 
+# Drop incomplete fragment reassembly if it exceeds this to prevent unbounded memory growth.
 _MAX_FRAGMENT_BUFFER = 10 * 1024 * 1024
 
 

@@ -5,6 +5,6 @@ pass-the-hash. For authorized research on hosts you control.
 """
 
 from .transport import AuthConfig, PipeConn
-from .session import PSRPSession
+from .session import PSRPSession, set_debug
 
-__all__ = ["AuthConfig", "PipeConn", "PSRPSession"]
+__all__ = ["AuthConfig", "PipeConn", "PSRPSession", "set_debug"]

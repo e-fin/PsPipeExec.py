@@ -41,16 +41,20 @@ from .framing import (
 #   * calling set_debug(True) — e.g. from cli.py's --debug flag.
 _DEBUG = os.environ.get("PSPIPE_DEBUG", "") not in ("", "0", "false", "False")
 
-_STREAM_MESSAGE_TYPES: dict[int, str] = {}
-for _attr, _label in (
-    ("WARNING_RECORD", "WARNING"),
-    ("VERBOSE_RECORD", "VERBOSE"),
-    ("DEBUG_RECORD", "DEBUG"),
-    ("INFORMATION_RECORD", "INFO"),
-):
-    _val = getattr(MessageType, _attr, None)
-    if _val is not None:
-        _STREAM_MESSAGE_TYPES[_val] = _label
+# Map PSRP stream message type IDs to display prefixes (built via getattr
+# so the tool still works if pypsrp is missing any of these constants).
+_STREAM_MESSAGE_TYPES: dict[int, str] = {
+    v: label
+    for attr, label in (
+        ("WARNING_RECORD", "WARNING"),
+        ("VERBOSE_RECORD", "VERBOSE"),
+        ("DEBUG_RECORD", "DEBUG"),
+        ("INFORMATION_RECORD", "INFO"),
+    )
+    if (v := getattr(MessageType, attr, None)) is not None
+}
+
+# Reverse lookup for debug logging: message type int -> name.
 _MT_NAMES = {v: k for k, v in vars(MessageType).items() if k.isupper()}
 
 
@@ -58,10 +62,6 @@ def set_debug(enabled: bool) -> None:
     """Turn wire tracing on or off at runtime (used by the --debug CLI flag)."""
     global _DEBUG
     _DEBUG = bool(enabled)
-
-
-def debug_enabled() -> bool:
-    return _DEBUG
 
 
 def _dbg(msg: str) -> None:
@@ -95,7 +95,6 @@ class PSRPSession:
         self._stop = threading.Event()
         self._pool_open = threading.Event()
         self._pipeline_done = threading.Event()
-        self._command_ack = threading.Event()
 
         # Reader parking. The reader only issues blocking reads while _reader_run
         # is set; otherwise it parks (announcing via _reader_idle) without any
@@ -118,7 +117,6 @@ class PSRPSession:
         _dbg(f"  sent <{pkt.tag}> ps_guid={pkt.ps_guid[:8]} ({len(wire)} bytes)")
 
     def _send_message(self, message_type: int, pid: Optional[str], data_obj) -> None:
-
         msg = Message(Destination.SERVER, self.pool_id, pid, data_obj, self.serializer)
         packed = msg.pack()
         channel = pid if pid is not None else EMPTY_GUID
@@ -155,10 +153,9 @@ class PSRPSession:
 
     # -- command execution ----------------------------------------------------
 
-    def run_command(self, command: str, wait: bool = True, timeout: float = 30.0) -> str:
+    def run_command(self, command: str, wait: bool = True, timeout: float = 30.0) -> None:
         pid = str(uuid.uuid4())
         self._pipeline_done.clear()
-        self._command_ack.clear()
 
         pipeline = Pipeline(
             is_nested=False,
@@ -192,7 +189,6 @@ class PSRPSession:
         finally:
             # Park the reader again so the next idle period is safe.
             self._reader_park()
-        return ""
 
     # -- reader loop ----------------------------------------------------------
 
@@ -253,10 +249,7 @@ class PSRPSession:
     def _handle_packet(self, pkt: OOPPacket) -> None:
         _dbg(f"recv packet <{pkt.tag}> ps_guid={pkt.ps_guid[:8]} payload={len(pkt.payload)}")
         tag = pkt.tag
-        if tag == "CommandAck":
-            self._command_ack.set()
-            return
-        if tag in ("DataAck", "SignalAck", "CloseAck"):
+        if tag in ("CommandAck", "DataAck", "SignalAck", "CloseAck"):
             return
         if tag != "Data":
             return
@@ -298,12 +291,14 @@ class PSRPSession:
         elif mt == MessageType.PIPELINE_STATE:
             state = getattr(getattr(message, "data", None), "state", None)
             _dbg(f"  pipeline state = {state}")
-            if state in (4, 5, 6):  # Completed / Failed / Stopped
+            # PSRP PipelineState enum: 4=Completed, 5=Failed, 6=Stopped
+            if state in (4, 5, 6):
                 self._pipeline_done.set()
         elif mt == MessageType.RUNSPACEPOOL_STATE:
             state = getattr(getattr(message, "data", None), "state", None)
             _dbg(f"  runspacepool state = {state}")
-            if state == 2:  # Opened
+            # RunspacePoolState enum: 2=Opened
+            if state == 2:
                 self._pool_open.set()
         # host calls / private data / key exchange: accepted, not acted upon.
 
@@ -314,6 +309,9 @@ class PSRPSession:
 
 
 def _build_command(command: str, is_script: bool = True) -> Command:
+    # PSRP returns raw .NET objects; pipe through Out-String so PowerShell's
+    # formatting engine renders them as the table/list text users expect.
+    # -Stream emits line-by-line instead of one blob, for incremental output.
     formatted = f"& {{\n{command}\n}} | Out-String -Stream"
     none = lambda: PipelineResultTypes(value=PipelineResultTypes.NONE)
     return Command(
@@ -326,6 +324,11 @@ def _build_command(command: str, is_script: bool = True) -> Command:
 
 
 def _stringify(data) -> str:
+    """Extract display text from a deserialized PSRP object.
+
+    Tries, in order: raw string, pypsrp .string/.text attrs, .NET ToString(),
+    adapted property key-value pairs, and finally repr as a last resort.
+    """
     if data is None:
         return ""
     if isinstance(data, str):
