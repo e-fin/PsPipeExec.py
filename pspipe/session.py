@@ -40,6 +40,17 @@ from .framing import (
 #   * environment variable PSPIPE_DEBUG=1 (default at import time), or
 #   * calling set_debug(True) — e.g. from cli.py's --debug flag.
 _DEBUG = os.environ.get("PSPIPE_DEBUG", "") not in ("", "0", "false", "False")
+
+_STREAM_MESSAGE_TYPES: dict[int, str] = {}
+for _attr, _label in (
+    ("WARNING_RECORD", "WARNING"),
+    ("VERBOSE_RECORD", "VERBOSE"),
+    ("DEBUG_RECORD", "DEBUG"),
+    ("INFORMATION_RECORD", "INFO"),
+):
+    _val = getattr(MessageType, _attr, None)
+    if _val is not None:
+        _STREAM_MESSAGE_TYPES[_val] = _label
 _MT_NAMES = {v: k for k, v in vars(MessageType).items() if k.isupper()}
 
 
@@ -279,6 +290,11 @@ class PSRPSession:
         elif mt == MessageType.ERROR_RECORD:
             self.on_error(_stringify(message.data) if message is not None
                           else "(error record; body not deserialized)")
+        elif mt in _STREAM_MESSAGE_TYPES:
+            prefix = _STREAM_MESSAGE_TYPES[mt]
+            text = _stringify(message.data) if message is not None else ""
+            if text:
+                self.on_output(f"[{prefix}] {text}")
         elif mt == MessageType.PIPELINE_STATE:
             state = getattr(getattr(message, "data", None), "state", None)
             _dbg(f"  pipeline state = {state}")
@@ -298,9 +314,10 @@ class PSRPSession:
 
 
 def _build_command(command: str, is_script: bool = True) -> Command:
+    formatted = f"& {{\n{command}\n}} | Out-String -Stream"
     none = lambda: PipelineResultTypes(value=PipelineResultTypes.NONE)
     return Command(
-        cmd=command, is_script=is_script, use_local_scope=None,
+        cmd=formatted, is_script=is_script, use_local_scope=None,
         merge_my_result=none(), merge_to_result=none(), merge_previous=none(),
         merge_error=none(), merge_warning=none(), merge_verbose=none(),
         merge_debug=none(), merge_information=none(),
@@ -311,9 +328,19 @@ def _build_command(command: str, is_script: bool = True) -> Command:
 def _stringify(data) -> str:
     if data is None:
         return ""
+    if isinstance(data, str):
+        return data
     inner = getattr(data, "data", data)
+    if isinstance(inner, str):
+        return inner
     for attr in ("string", "text"):
         val = getattr(inner, attr, None)
         if isinstance(val, str):
             return val
+    ts = getattr(inner, "to_string", None)
+    if isinstance(ts, str) and ts:
+        return ts
+    props = getattr(inner, "adapted_properties", None)
+    if props:
+        return "  ".join(f"{k}: {v}" for k, v in props.items())
     return str(inner)

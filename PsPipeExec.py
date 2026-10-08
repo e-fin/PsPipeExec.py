@@ -4,8 +4,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import time
-from charset_normalizer import from_path
 
 from pspipe.transport import AuthConfig, PipeConn
 from pspipe.session import PSRPSession, set_debug
@@ -32,9 +30,6 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument('-dc-ip', action='store', metavar="ip address",
                        help='IP Address of the domain controller. If omitted it will use the domain part (FQDN) specified in '
                             'the target parameter')
-    group.add_argument('-target-ip', action='store', metavar="ip address",
-                       help='IP Address of the target machine. If omitted it will use whatever was specified as target. '
-                            'This is useful when target is the NetBIOS name and you cannot resolve it')
     group.add_argument('-port', choices=['139', '445'], nargs='?', default='445', metavar="destination port",
                        help='Destination port to connect to SMB Server')
 
@@ -43,7 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--pipe", default="", help="full pipe name under IPC$ to connect to")
     group.add_argument("--command", default="", help="run one command and exit (non-interactive)")
     group.add_argument("--script", default="", help="run entire PS1 file")
- 
+    group.add_argument("--timeout", type=float, default=30.0,
+                       help="seconds to wait for a command to complete (default: 30)")
+
     return parser
 
 
@@ -70,7 +67,12 @@ def main(argv=None) -> int:
         from getpass import getpass
         password = getpass("Password:")
     if args.hashes is not None:
-        lmhash, nthash = args.hashes.split(':')
+        parts = args.hashes.split(':')
+        if len(parts) != 2:
+            print("[!] --hashes format must be LMHASH:NTHASH (use empty string for missing, e.g. :NTHASH)",
+                  file=sys.stderr)
+            return 1
+        lmhash, nthash = parts
     else:
         lmhash = ''
         nthash = ''
@@ -81,7 +83,7 @@ def main(argv=None) -> int:
         username=username,
         password=password,
         domain=domain,
-        port=args.port,
+        port=int(args.port),
         use_kerberos=args.k,
         aes_key=args.aesKey,
         kdc_host=args.dc_ip,
@@ -126,33 +128,33 @@ def main(argv=None) -> int:
         session = PSRPSession(conn)
         session.open()
 
-        if args.script:
-            scriptcontent = from_path(args.script).best()
-            contents = str(scriptcontent)
-            session.run_command(contents, wait=True)
-            #time.sleep(5)
-            #session.close()
-            return 0
-        if args.command:
-            session.run_command(args.command, wait=True)
-            #time.sleep(0.3)
-            #session.close()
-            return 0
-
-        #'''INTERACTIVE DOESNT WORK YET
-        print("Connected. Enter PowerShell commands; 'exit' to quit.")
+        timeout = args.timeout
         try:
-            while True:
-                try:
-                    line = input("PS> ").strip()
-                except EOFError:
-                    break
-                if line in ("exit", "quit"):
-                    break
-                if line:
-                    session.run_command(line, wait=True)
+            if args.script:
+                if not os.path.isfile(args.script):
+                    print(f"[!] script file not found: {args.script}", file=sys.stderr)
+                    return 1
+                from charset_normalizer import from_path
+                result = from_path(args.script).best()
+                if result is None:
+                    print(f"[!] could not detect encoding for: {args.script}", file=sys.stderr)
+                    return 1
+                session.run_command(str(result), wait=True, timeout=timeout)
+            elif args.command:
+                session.run_command(args.command, wait=True, timeout=timeout)
+            else:
+                print("Connected. Enter PowerShell commands; 'exit' to quit.")
+                while True:
+                    try:
+                        line = input("PS> ").strip()
+                    except EOFError:
+                        break
+                    if line in ("exit", "quit"):
+                        break
+                    if line:
+                        session.run_command(line, wait=True, timeout=timeout)
         finally:
-            session.close()#'''
+            session.close()
         return 0
     finally:
         conn.close()

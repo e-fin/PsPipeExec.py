@@ -74,6 +74,9 @@ def parse_fragment(data: bytes) -> Fragment:
     )
 
 
+_MAX_FRAGMENT_BUFFER = 10 * 1024 * 1024
+
+
 class Defragmenter:
     """Reassembles fragments keyed by object_id until the End flag is seen."""
 
@@ -81,8 +84,13 @@ class Defragmenter:
         self._buffers: Dict[int, bytearray] = {}
 
     def push(self, frag: Fragment) -> Optional[bytes]:
+        if frag.start:
+            self._buffers.pop(frag.object_id, None)
         buf = self._buffers.setdefault(frag.object_id, bytearray())
         buf.extend(frag.blob)
+        if len(buf) > _MAX_FRAGMENT_BUFFER:
+            del self._buffers[frag.object_id]
+            return None
         if frag.end:
             out = bytes(buf)
             del self._buffers[frag.object_id]
@@ -101,11 +109,11 @@ class OOPPacket:
 
     def pack(self) -> bytes:
         if self.tag == "Data":
-            inner = base64.b64encode(self.payload).decode("ascii")
-            xml = f"<Data Stream='{self.stream}' PSGuid='{self.ps_guid}'>{inner}</Data>"
+            elem = ET.Element("Data", Stream=self.stream, PSGuid=self.ps_guid)
+            elem.text = base64.b64encode(self.payload).decode("ascii")
         else:
-            xml = f"<{self.tag} PSGuid='{self.ps_guid}' />"
-        return xml.encode("utf-8") + _DELIM
+            elem = ET.Element(self.tag, PSGuid=self.ps_guid)
+        return ET.tostring(elem, encoding="unicode").encode("utf-8") + _DELIM
 
 
 def parse_packet(raw: bytes) -> OOPPacket:

@@ -148,8 +148,6 @@ class PipeConn:
             except SessionError:
                 # e.g. STATUS_PIPE_EMPTY / pending — treat as no data this poll.
                 return b""
-            except Exception:
-                return b""
 
     def close(self) -> None:
         if self._smb is None:
