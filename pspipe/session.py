@@ -153,13 +153,13 @@ class PSRPSession:
 
     # -- command execution ----------------------------------------------------
 
-    def run_command(self, command: str, wait: bool = True, timeout: float = 30.0) -> None:
+    def run_command(self, command: str, wait: bool = True) -> None:
         pid = str(uuid.uuid4())
         self._pipeline_done.clear()
 
         pipeline = Pipeline(
             is_nested=False,
-            cmds=[_build_command(command)],  # pypsrp Pipeline reads 'cmds'
+            cmds=[_build_command(command)],
             history=None,
             redirect_err_to_out=True,
         )
@@ -167,8 +167,7 @@ class PSRPSession:
         # Wake the reader for this command. Because it was parked while idle,
         # there is no stale read pending on the handle, so the <Command> and
         # CreatePipeline writes reach the server cleanly regardless of how long
-        # we were idle. We do NOT wait on CommandAck between the two sends (a
-        # bare <Command> isn't acked on its own; that wait only added delay).
+        # we were idle.
         _dbg(f"activating reader + creating pipeline {pid[:8]}")
         self._reader_activate()
         self._send_oop(OOPPacket(tag="Command", ps_guid=pid))
@@ -184,11 +183,27 @@ class PSRPSession:
         )
         try:
             if wait:
-                if not self._pipeline_done.wait(timeout):
-                    self.on_error(f"pipeline did not complete within {timeout:.0f}s")
+                # Block until the pipeline finishes. Uses 1s polling so that
+                # KeyboardInterrupt (Ctrl+C) is delivered between waits.
+                while not self._pipeline_done.wait(timeout=1.0):
+                    pass
+        except KeyboardInterrupt:
+            # Tell the server to stop the pipeline before re-raising.
+            self._stop_pipeline(pid)
+            raise
         finally:
-            # Park the reader again so the next idle period is safe.
             self._reader_park()
+
+    def _stop_pipeline(self, pid: str) -> None:
+        """Send a Signal to cancel the running pipeline on the server."""
+        _dbg(f"sending stop signal for pipeline {pid[:8]}")
+        try:
+            self._send_oop(OOPPacket(tag="Signal", ps_guid=pid))
+        except Exception as exc:  # noqa: BLE001
+            _dbg(f"failed to send stop signal: {exc!r}")
+            return
+        # Wait for the server to stop the pipeline (PipelineState -> Stopped).
+        self._pipeline_done.wait(timeout=5.0)
 
     # -- reader loop ----------------------------------------------------------
 
@@ -312,7 +327,7 @@ def _build_command(command: str, is_script: bool = True) -> Command:
     # PSRP returns raw .NET objects; pipe through Out-String so PowerShell's
     # formatting engine renders them as the table/list text users expect.
     # -Stream emits line-by-line instead of one blob, for incremental output.
-    formatted = f"& {{\n{command}\n}} | Out-String -Stream"
+    formatted = f". {{\n{command}\n}} | Out-String -Stream"
     none = lambda: PipelineResultTypes(value=PipelineResultTypes.NONE)
     return Command(
         cmd=formatted, is_script=is_script, use_local_scope=None,

@@ -38,10 +38,48 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--pipe", default="", help="full pipe name under IPC$ to connect to")
     group.add_argument("--command", default="", help="run one command and exit (non-interactive)")
     group.add_argument("--script", default="", help="run entire PS1 file")
-    group.add_argument("--timeout", type=float, default=30.0,
-                       help="seconds to wait for a command to complete (default: 30)")
 
     return parser
+
+
+def _is_block_complete(text: str) -> bool:
+    """Check if braces are balanced outside of string literals and comments."""
+    depth = 0
+    in_single = False
+    in_double = False
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if in_single:
+            # '' is the escape for a literal quote inside single-quoted strings
+            if c == "'" and i + 1 < len(text) and text[i + 1] == "'":
+                i += 2
+                continue
+            if c == "'":
+                in_single = False
+        elif in_double:
+            # Backtick is the escape character inside double-quoted strings
+            if c == "`" and i + 1 < len(text):
+                i += 2
+                continue
+            if c == '"':
+                in_double = False
+        else:
+            if c == "'":
+                in_single = True
+            elif c == '"':
+                in_double = True
+            elif c == '#':
+                # Line comment — skip to end of line
+                while i < len(text) and text[i] != '\n':
+                    i += 1
+                continue
+            elif c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+        i += 1
+    return depth <= 0 and not in_single and not in_double
 
 
 def main(argv=None) -> int:
@@ -135,7 +173,6 @@ def main(argv=None) -> int:
         session = PSRPSession(conn)
         session.open()
 
-        timeout = args.timeout
         try:
             if args.script:
                 if not os.path.isfile(args.script):
@@ -146,9 +183,9 @@ def main(argv=None) -> int:
                 if result is None:
                     print(f"[!] could not detect encoding for: {args.script}", file=sys.stderr)
                     return 1
-                session.run_command(str(result), wait=True, timeout=timeout)
+                session.run_command(str(result))
             elif args.command:
-                session.run_command(args.command, wait=True, timeout=timeout)
+                session.run_command(args.command)
             else:
                 print("Connected. Enter PowerShell commands; 'exit' to quit.")
                 while True:
@@ -158,8 +195,25 @@ def main(argv=None) -> int:
                         break
                     if line in ("exit", "quit"):
                         break
-                    if line:
-                        session.run_command(line, wait=True, timeout=timeout)
+                    if not line:
+                        continue
+
+                    # Accumulate continuation lines for incomplete blocks
+                    block = line
+                    while not _is_block_complete(block):
+                        try:
+                            block += "\n" + input(">> ")
+                        except (EOFError, KeyboardInterrupt):
+                            block = ""
+                            print()
+                            break
+
+                    if not block.strip():
+                        continue
+                    try:
+                        session.run_command(block)
+                    except KeyboardInterrupt:
+                        print()
         finally:
             session.close()
         return 0
