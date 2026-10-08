@@ -13,7 +13,7 @@ from impacket.examples.utils import parse_target
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="PowerShell Pipe Jacker")
+    parser = argparse.ArgumentParser(description="PowerShell Named Pipe Lateral Movement Tool")
     parser.add_argument('target', action='store', help='[[domain/]username[:password]@]<targetName or address>')
     parser.add_argument('-debug', action='store_true', help='Turn DEBUG output ON')
     
